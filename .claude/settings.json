@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "hf-cli@huggingface-skills": true,
+    "github@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true
+  }
+}
