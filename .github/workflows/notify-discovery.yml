@@ -1,0 +1,28 @@
+name: Email Daily Discovery
+
+on:
+  issue_comment:
+    types: [created]
+
+jobs:
+  send-email:
+    if: github.event.issue.number == 1 && contains(github.event.comment.body, '每日重磅发现')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send email via Resend
+        env:
+          RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          COMMENT_BODY: ${{ github.event.comment.body }}
+        run: |
+          SUBJECT="🔥 HF-Git 每日重磅发现 — $(date -u +%Y-%m-%d)"
+
+          jq -n \
+            --arg from "onboarding@resend.dev" \
+            --arg to "eric.dev.liu@gmail.com" \
+            --arg subject "$SUBJECT" \
+            --arg text "$COMMENT_BODY" \
+            '{from: $from, to: [$to], subject: $subject, text: $text}' \
+          | curl -s -X POST https://api.resend.com/emails \
+              -H "Authorization: Bearer $RESEND_API_KEY" \
+              -H "Content-Type: application/json" \
+              -d @-
