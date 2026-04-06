@@ -7,38 +7,66 @@ on:
 
 permissions:
   issues: write
+  contents: read
 
 jobs:
   post-comment:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
 
-      - name: Post new report files as issue comments
+      - name: Post report files as issue comments
         uses: actions/github-script@v7
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
-            const { execSync } = require('child_process');
             const fs = require('fs');
+            const path = require('path');
 
-            // Get files changed in this push
-            const changed = execSync('git diff HEAD~1 --name-only --diff-filter=A')
-              .toString().trim().split('\n')
-              .filter(f => f.startsWith('reports/') && f.endsWith('.md'));
+            // Find all .md files in reports/
+            if (!fs.existsSync('reports')) {
+              console.log('No reports directory found');
+              return;
+            }
 
-            for (const file of changed) {
-              if (!fs.existsSync(file)) continue;
-              const body = fs.readFileSync(file, 'utf8').trim();
+            const files = fs.readdirSync('reports')
+              .filter(f => f.endsWith('.md'))
+              .sort();
+
+            console.log('Found report files:', files);
+
+            // Get already-posted reports by checking issue comments
+            const { data: existingComments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: 1,
+              per_page: 100
+            });
+
+            // Post reports that haven't been posted yet (check by filename date marker)
+            for (const file of files) {
+              const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})\.md$/);
+              if (!dateMatch) continue;
+              const reportDate = dateMatch[1];
+
+              const alreadyPosted = existingComments.some(c =>
+                c.body.includes(`每日重磅发现 — ${reportDate}`)
+              );
+
+              if (alreadyPosted) {
+                console.log(`Report for ${reportDate} already posted, skipping`);
+                continue;
+              }
+
+              const body = fs.readFileSync(path.join('reports', file), 'utf8').trim();
               if (!body) continue;
 
-              console.log(`Posting ${file} to issue #1`);
+              console.log(`Posting report for ${reportDate}`);
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
                 repo: context.repo.repo,
                 issue_number: 1,
                 body: body
               });
+              console.log(`Successfully posted report for ${reportDate}`);
             }
