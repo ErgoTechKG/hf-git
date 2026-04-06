@@ -1,0 +1,44 @@
+name: Post Daily Report to Issue
+
+on:
+  push:
+    paths:
+      - 'reports/**.md'
+
+permissions:
+  issues: write
+
+jobs:
+  post-comment:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Post new report files as issue comments
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { execSync } = require('child_process');
+            const fs = require('fs');
+
+            // Get files changed in this push
+            const changed = execSync('git diff HEAD~1 --name-only --diff-filter=A')
+              .toString().trim().split('\n')
+              .filter(f => f.startsWith('reports/') && f.endsWith('.md'));
+
+            for (const file of changed) {
+              if (!fs.existsSync(file)) continue;
+              const body = fs.readFileSync(file, 'utf8').trim();
+              if (!body) continue;
+
+              console.log(`Posting ${file} to issue #1`);
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: 1,
+                body: body
+              });
+            }
