@@ -7,7 +7,6 @@ on:
 
 permissions:
   issues: write
-  contents: read
 
 jobs:
   post-comment:
@@ -15,58 +14,37 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Post report files as issue comments
-        uses: actions/github-script@v7
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          script: |
-            const fs = require('fs');
-            const path = require('path');
+      - name: Post report as issue comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OWNER: ${{ github.repository_owner }}
+          REPO: ${{ github.event.repository.name }}
+        run: |
+          for f in reports/*.md; do
+            [ -f "$f" ] || continue
+            DATE=$(basename "$f" .md)
+            echo "Processing $f (date: $DATE)"
 
-            // Find all .md files in reports/
-            if (!fs.existsSync('reports')) {
-              console.log('No reports directory found');
-              return;
-            }
+            # Check if already posted
+            EXISTING=$(curl -s -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$OWNER/$REPO/issues/1/comments?per_page=100" \
+              | grep -c "每日重磅发现 — $DATE" || true)
 
-            const files = fs.readdirSync('reports')
-              .filter(f => f.endsWith('.md'))
-              .sort();
+            if [ "$EXISTING" -gt 0 ]; then
+              echo "Report $DATE already posted, skipping"
+              continue
+            fi
 
-            console.log('Found report files:', files);
+            echo "Posting report for $DATE"
+            BODY=$(cat "$f")
 
-            // Get already-posted reports by checking issue comments
-            const { data: existingComments } = await github.rest.issues.listComments({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              issue_number: 1,
-              per_page: 100
-            });
+            curl -s -X POST \
+              -H "Authorization: Bearer $GH_TOKEN" \
+              -H "Content-Type: application/json" \
+              -H "Accept: application/vnd.github+json" \
+              --data-binary "$(jq -n --arg body "$BODY" '{body: $body}')" \
+              "https://api.github.com/repos/$OWNER/$REPO/issues/1/comments" \
+              | jq '{id: .id, created_at: .created_at}'
 
-            // Post reports that haven't been posted yet (check by filename date marker)
-            for (const file of files) {
-              const dateMatch = file.match(/^(\d{4}-\d{2}-\d{2})\.md$/);
-              if (!dateMatch) continue;
-              const reportDate = dateMatch[1];
-
-              const alreadyPosted = existingComments.some(c =>
-                c.body.includes(`每日重磅发现 — ${reportDate}`)
-              );
-
-              if (alreadyPosted) {
-                console.log(`Report for ${reportDate} already posted, skipping`);
-                continue;
-              }
-
-              const body = fs.readFileSync(path.join('reports', file), 'utf8').trim();
-              if (!body) continue;
-
-              console.log(`Posting report for ${reportDate}`);
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: 1,
-                body: body
-              });
-              console.log(`Successfully posted report for ${reportDate}`);
-            }
+            echo "Done posting $DATE"
+          done
